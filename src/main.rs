@@ -1,38 +1,41 @@
 use bevy::prelude::*;
+use bevy::window::{CursorGrabMode, PrimaryWindow};
 
+mod player;
 mod world;
 mod chunk;
-mod player;
 
-use world::*;
-use chunk::*;
-use player::*;
+// [수정] 끝부분에 있던 GameAssets를 지웠습니다.
+use crate::world::{setup_game, VoxelWorld, ChunkManager, GameState, TextureMap}; 
+use crate::chunk::{load_assets, check_assets_ready, update_chunks, rebuild_chunks};
+use crate::player::{setup_ui_once, player_look, player_physics, player_interaction};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
         .init_state::<GameState>()
-        
-        // 리소스 초기화
-        .init_resource::<VoxelWorld>()
-        .init_resource::<ChunkManager>()
-        .init_resource::<GameAssets>() // 폴더 핸들 저장소
-        .init_resource::<TextureMap>() // 이름표 저장소
-
-        // [1] 로딩 상태
+        .insert_resource(VoxelWorld::default())
+        .insert_resource(ChunkManager::default())
+        .insert_resource(TextureMap::default())
+        .add_systems(Startup, (setup_ui_once, grab_cursor))
         .add_systems(OnEnter(GameState::Loading), load_assets)
         .add_systems(Update, check_assets_ready.run_if(in_state(GameState::Loading)))
-
-        // [2] 게임 상태
+        
         .add_systems(OnEnter(GameState::InGame), setup_game)
+        
         .add_systems(Update, (
-            update_chunks,
-            player_look,
-            player_physics,
-            player_interaction,
-            setup_ui_once,
-            rebuild_chunks,
+            player_look, 
+            player_physics, 
+            player_interaction, 
+            update_chunks, 
+            rebuild_chunks
         ).run_if(in_state(GameState::InGame)))
         
         .run();
+}
+
+fn grab_cursor(mut q_windows: Query<&mut Window, With<PrimaryWindow>>) {
+    let mut primary_window = q_windows.single_mut();
+    primary_window.cursor.grab_mode = CursorGrabMode::Locked;
+    primary_window.cursor.visible = false;
 }
