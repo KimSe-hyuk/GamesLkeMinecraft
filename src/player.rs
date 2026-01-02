@@ -6,12 +6,12 @@ use crate::chunk::{ChunkCoord, NeedsRemesh};
 pub struct Player {
     pub velocity: Vec3,
     pub on_ground: bool,
-    pub pitch: f32,
+    pub pitch: f32, // 위아래 회전 (고개)
+    pub yaw: f32,   // 좌우 회전 (몸통)
 }
 
-// === 1. 카메라/마우스 회전 ===
+// === 1. 마우스 시점 변환 (위아래 고정 해결) ===
 pub fn player_look(
-    _time: Res<Time>,
     mut mouse_motion_events: EventReader<bevy::input::mouse::MouseMotion>,
     mut query: Query<(&mut Transform, &mut Player)>,
 ) {
@@ -21,56 +21,53 @@ pub fn player_look(
     }
 
     for (mut transform, mut player) in query.iter_mut() {
-        transform.rotate_y(-delta.x * 0.003);
-        player.pitch -= delta.y * 0.003;
+        let sensitivity = 0.003; // 마우스 감도
+
+        // 값 누적
+        player.yaw -= delta.x * sensitivity;
+        player.pitch -= delta.y * sensitivity;
+
+        // 고개 각도 제한 (-89도 ~ +89도)
         player.pitch = player.pitch.clamp(-1.55, 1.55);
 
-        let yaw_rotation = Quat::from_axis_angle(Vec3::Y, transform.rotation.to_euler(EulerRot::YXZ).0);
-        let pitch_rotation = Quat::from_axis_angle(Vec3::X, player.pitch);
-        transform.rotation = yaw_rotation * pitch_rotation;
+        // 회전 적용 (쿼터니언 연산: Y축 회전 후 X축 회전)
+        transform.rotation = Quat::from_euler(EulerRot::YXZ, player.yaw, player.pitch, 0.0);
     }
 }
 
-// === 2. 물리 엔진 (추락 방지 기능 추가!) ===
+// === 2. 물리 엔진 (벽 통과 방지 + AABB 충돌) ===
 pub fn player_physics(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut query: Query<(&mut Transform, &mut Player)>,
-    // [중요] 청크 매니저를 가져와서 땅이 있는지 확인해야 함
-    chunk_manager: Res<ChunkManager>, 
+    chunk_manager: Res<ChunkManager>,
+    voxel_world: Res<VoxelWorld>,
 ) {
     let dt = time.delta_seconds();
 
     for (mut transform, mut player) in query.iter_mut() {
-        // [핵심 수정] 내 위치에 청크가 로딩되었는지 확인
+        // 내 발밑 청크가 로딩 안 됐으면 멈춤 (추락 방지)
         let cx = (transform.translation.x / CHUNK_SIZE as f32).floor() as i32;
         let cz = (transform.translation.z / CHUNK_SIZE as f32).floor() as i32;
-        let current_chunk_coord = IVec3::new(cx, 0, cz);
+        if !chunk_manager.loaded_chunks.contains_key(&IVec3::new(cx, 0, cz)) { return; }
 
-        // 만약 내 발밑 청크가 아직 안 만들어졌다면?
-        // -> 움직이지 말고, 중력도 받지 말고 공중에 떠 있어라! (로딩 대기)
-        if !chunk_manager.loaded_chunks.contains_key(&current_chunk_coord) {
-            // 아직 로딩 중이면 함수 종료 (떨어지지 않음)
-            return; 
-        }
-
-        // --- 로딩이 다 된 후에야 아래 코드가 실행됨 ---
-
+        // --- 입력 처리 ---
         let mut input_dir = Vec3::ZERO;
-        let forward = transform.forward();
-        let right = transform.right();
-        let forward_flat = Vec3::new(forward.x, 0.0, forward.z).normalize_or_zero();
-        let right_flat = Vec3::new(right.x, 0.0, right.z).normalize_or_zero();
+        // 시선 방향 기준으로 수평 이동 벡터 계산
+        let yaw_rot = Quat::from_rotation_y(player.yaw);
+        let forward = yaw_rot * Vec3::NEG_Z; 
+        let right = yaw_rot * Vec3::X;
 
-        if keyboard_input.pressed(KeyCode::KeyW) { input_dir += forward_flat; }
-        if keyboard_input.pressed(KeyCode::KeyS) { input_dir -= forward_flat; }
-        if keyboard_input.pressed(KeyCode::KeyD) { input_dir += right_flat; }
-        if keyboard_input.pressed(KeyCode::KeyA) { input_dir -= right_flat; }
+        if keyboard_input.pressed(KeyCode::KeyW) { input_dir += forward; }
+        if keyboard_input.pressed(KeyCode::KeyS) { input_dir -= forward; }
+        if keyboard_input.pressed(KeyCode::KeyD) { input_dir += right; }
+        if keyboard_input.pressed(KeyCode::KeyA) { input_dir -= right; }
 
         if input_dir.length_squared() > 0.0 {
             input_dir = input_dir.normalize();
         }
 
+        // --- 속도 설정 ---
         player.velocity.x = input_dir.x * MOVE_SPEED;
         player.velocity.z = input_dir.z * MOVE_SPEED;
 
@@ -80,19 +77,80 @@ pub fn player_physics(
         }
 
         player.velocity.y += GRAVITY * dt;
+
+        // --- [핵심] 충돌 처리 (Collision Detection) ---
         let move_delta = player.velocity * dt;
-        transform.translation += move_delta;
         
-        // [임시 충돌] 바닥(y=25) 밑으로 떨어지면 강제로 올림 (지형 평균 높이 고려)
-        if transform.translation.y < 25.0 { 
-             transform.translation.y = 25.0;
-             player.velocity.y = 0.0;
-             player.on_ground = true;
+        // 1. X축 이동 시도
+        let next_x = transform.translation + Vec3::new(move_delta.x, 0.0, 0.0);
+        if !check_collision(next_x, &voxel_world) {
+            transform.translation.x = next_x.x;
+        } else {
+            player.velocity.x = 0.0;
+        }
+
+        // 2. Z축 이동 시도
+        let next_z = transform.translation + Vec3::new(0.0, 0.0, move_delta.z);
+        if !check_collision(next_z, &voxel_world) {
+            transform.translation.z = next_z.z;
+        } else {
+            player.velocity.z = 0.0;
+        }
+
+        // 3. Y축 이동 시도
+        let next_y = transform.translation + Vec3::new(0.0, move_delta.y, 0.0);
+        if !check_collision(next_y, &voxel_world) {
+            transform.translation.y = next_y.y;
+            player.on_ground = false;
+        } else {
+            if player.velocity.y < 0.0 {
+                player.on_ground = true; // 바닥 착지
+            }
+            player.velocity.y = 0.0;
+        }
+
+        // [안전장치] 버그로 추락 시 복귀
+        if transform.translation.y < -50.0 {
+            transform.translation.y = 100.0;
+            player.velocity = Vec3::ZERO;
         }
     }
 }
 
-// === 3. 상호작용 (그대로 유지) ===
+// 충돌 감지 함수
+fn check_collision(pos: Vec3, world: &VoxelWorld) -> bool {
+    let padding = 0.3; // 몸통 두께
+    let height = 1.8;  // 키
+
+    let check_points = [
+        pos, // 발
+        pos + Vec3::new(padding, 0.0, 0.0),
+        pos + Vec3::new(-padding, 0.0, 0.0),
+        pos + Vec3::new(0.0, 0.0, padding),
+        pos + Vec3::new(0.0, 0.0, -padding),
+        // 머리
+        pos + Vec3::new(0.0, height, 0.0),
+        pos + Vec3::new(padding, height, 0.0),
+        pos + Vec3::new(-padding, height, 0.0),
+        pos + Vec3::new(0.0, height, padding),
+        pos + Vec3::new(0.0, height, -padding),
+    ];
+
+    for p in check_points {
+        let ix = p.x.floor() as i32;
+        let iy = p.y.floor() as i32;
+        let iz = p.z.floor() as i32;
+        
+        if let Some(&block) = world.blocks.get(&IVec3::new(ix, iy, iz)) {
+            if block != BLOCK_AIR {
+                return true; // 충돌 발생
+            }
+        }
+    }
+    false
+}
+
+// === 3. 블록 상호작용 (정밀 에임) ===
 pub fn player_interaction(
     mut commands: Commands,
     mouse_input: Res<ButtonInput<MouseButton>>,
@@ -105,11 +163,14 @@ pub fn player_interaction(
             let ray_start = transform.translation;
             let ray_dir = transform.forward();
 
-            for i in 1..8 {
-                let pos = ray_start + ray_dir * i as f32;
-                let ix = pos.x.round() as i32;
-                let iy = pos.y.round() as i32;
-                let iz = pos.z.round() as i32;
+            // 0.1 단위로 6.0 거리까지 검사
+            for i in 0..60 {
+                let dist = i as f32 * 0.1;
+                let pos = ray_start + ray_dir * dist;
+                
+                let ix = pos.x.floor() as i32;
+                let iy = pos.y.floor() as i32;
+                let iz = pos.z.floor() as i32;
                 let block_pos = IVec3::new(ix, iy, iz);
 
                 if let Some(&block_id) = voxel_world.blocks.get(&block_pos) {
@@ -126,7 +187,7 @@ pub fn player_interaction(
                                 break;
                             }
                         }
-                        break;
+                        break; 
                     }
                 }
             }
@@ -134,15 +195,10 @@ pub fn player_interaction(
     }
 }
 
-// === 4. UI 설정 (카메라 경고 완벽 해결) ===
+// === 4. UI 설정 (경고 해결됨!) ===
 pub fn setup_ui_once(mut commands: Commands) {
-    // [핵심 수정] UI 카메라는 순서(Order)를 1로 설정해서 3D 카메라(Order 0)보다 나중에 그립니다.
-    // 이러면 "Camera order ambiguities" 경고가 싹 사라집니다.
     commands.spawn(Camera2dBundle {
-        camera: Camera {
-            order: 1, 
-            ..default()
-        },
+        camera: Camera { order: 1, ..default() },
         ..default()
     });
 
@@ -158,14 +214,28 @@ pub fn setup_ui_once(mut commands: Commands) {
             ..default()
         }
     ).with_children(|parent| {
+        // 십자선 가로
         parent.spawn(NodeBundle {
             style: Style {
-                width: Val::Px(10.0),
-                height: Val::Px(10.0),
-                border: UiRect::all(Val::Px(2.0)),
+                width: Val::Px(16.0),
+                height: Val::Px(2.0),
+                position_type: PositionType::Absolute,
                 ..default()
             },
-            background_color: Color::WHITE.into(),
+            // [수정] Color::rgba -> Color::srgba 로 변경!
+            background_color: Color::srgba(1.0, 1.0, 1.0, 0.8).into(),
+            ..default()
+        });
+        // 십자선 세로
+        parent.spawn(NodeBundle {
+            style: Style {
+                width: Val::Px(2.0),
+                height: Val::Px(16.0),
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            // [수정] Color::rgba -> Color::srgba 로 변경!
+            background_color: Color::srgba(1.0, 1.0, 1.0, 0.8).into(),
             ..default()
         });
     });

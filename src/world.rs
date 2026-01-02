@@ -56,13 +56,14 @@ pub fn setup_game(mut commands: Commands) {
     // chunk가 로딩될 때까지 공중부양(player_physics 수정본 덕분)하다가 로딩되면 착지합니다.
     commands.spawn((
         Camera3dBundle {
-            transform: Transform::from_xyz(0.0, 100.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+            transform: Transform::from_xyz(0.0, 80.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             ..default()
         },
         Player {
             velocity: Vec3::ZERO,
             on_ground: false,
-            pitch: 0.0,
+            pitch: 0.0, // [필수] 초기값
+            yaw: 0.0,   // [필수] 초기값
         },
     ));
 
