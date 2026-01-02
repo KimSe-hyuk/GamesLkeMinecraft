@@ -1,0 +1,17 @@
+[package]
+name = "project_aether"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Bevy 엔진 0.14 버전 사용 (안정적이고 강력함)
+bevy = { version = "0.14", features = ["png", "jpeg", "webp", "bmp", "tga"] }
+rand = "0.8"
+# [중요] 최적화 설정: 이걸 넣어야 나중에 웹이나 게임에서 렉이 안 걸립니다.
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+opt-level = "z" # 용량 최소화 (웹 배포용)
+lto = true
+codegen-units = 1
