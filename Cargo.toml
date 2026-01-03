@@ -3,15 +3,26 @@ name = "project_aether"
 version = "0.1.0"
 edition = "2021"
 
+# === 라이브러리 설정 ===
 [dependencies]
-# Bevy 엔진 0.14 버전 사용 (안정적이고 강력함)
-bevy = { version = "0.14", features = ["png", "jpeg", "webp", "bmp", "tga"] }
+# 1. dynamic_linking: 컴파일 속도 10배 향상 (개발용)
+# 2. 이미지 포맷들: png, jpeg 등등 지원
+bevy = { version = "0.14", features = ["dynamic_linking", "png", "jpeg", "webp", "bmp", "tga"] }
+futures-lite = "2.6.1"
 rand = "0.8"
-# [중요] 최적화 설정: 이걸 넣어야 나중에 웹이나 게임에서 렉이 안 걸립니다.
-[profile.dev]
-opt-level = 1
 
+# === 개발 모드 최적화 (cargo run) ===
+[profile.dev]
+opt-level = 1           # 내 코드는 적당히 최적화 (빠른 컴파일)
+
+# [핵심] 내 코드 말고 'Bevy 엔진'은 최고 속도로 미리 최적화해둠
+# 이걸 넣어야 개발 중에도 렉 없이 부드럽습니다.
+[profile.dev.package."*"]
+opt-level = 3
+
+# === 배포 모드 최적화 (cargo run --release) ===
 [profile.release]
-opt-level = "z" # 용량 최소화 (웹 배포용)
-lto = true
-codegen-units = 1
+opt-level = 3           # 최고 성능 (z는 용량은 작지만 속도는 3이 더 빠름)
+lto = "thin"            # 링킹 최적화 (속도 향상)
+codegen-units = 1       # 병렬 처리 끄고 꼼꼼하게 압축 (오래 걸리지만 성능 최고)
+strip = true            # 불필요한 정보 제거 (용량 감소)
