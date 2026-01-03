@@ -5,10 +5,10 @@ mod player;
 mod world;
 mod chunk;
 
-// [수정] 끝부분에 있던 GameAssets를 지웠습니다.
 use crate::world::{setup_game, VoxelWorld, ChunkManager, GameState, TextureMap}; 
 use crate::chunk::{load_assets, check_assets_ready, update_chunks, rebuild_chunks};
-use crate::player::{setup_ui_once, player_look, player_physics, player_interaction};
+// [수정] highlight_block 추가
+use crate::player::{setup_ui_once, player_look, player_physics, player_interaction, highlight_block}; 
 
 fn main() {
     App::new()
@@ -28,7 +28,8 @@ fn main() {
             player_physics, 
             player_interaction, 
             update_chunks, 
-            rebuild_chunks
+            rebuild_chunks,
+            highlight_block // <--- [여기] 시스템 등록!
         ).run_if(in_state(GameState::InGame)))
         
         .run();
