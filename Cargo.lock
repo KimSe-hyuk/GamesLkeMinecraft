@@ -3072,6 +3072,7 @@ name = "project_aether"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "futures-lite",
  "rand",
 ]
 

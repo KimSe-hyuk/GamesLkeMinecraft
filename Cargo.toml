@@ -8,6 +8,7 @@ edition = "2021"
 # 1. dynamic_linking: 컴파일 속도 10배 향상 (개발용)
 # 2. 이미지 포맷들: png, jpeg 등등 지원
 bevy = { version = "0.14", features = ["dynamic_linking", "png", "jpeg", "webp", "bmp", "tga"] }
+futures-lite = "2.6.1"
 rand = "0.8"
 
 # === 개발 모드 최적화 (cargo run) ===

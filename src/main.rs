@@ -4,13 +4,17 @@ use bevy::window::{CursorGrabMode, PrimaryWindow};
 mod player;
 mod world;
 mod chunk;
-mod ui; // [추가] ui 모듈 등록
+mod ui;
+mod physics;
+mod interaction;
 
 use crate::world::{setup_game, VoxelWorld, ChunkManager, GameState, TextureMap}; 
-use crate::chunk::{load_assets, check_assets_ready, update_chunks, rebuild_chunks};
-use crate::player::{player_look, player_physics, player_interaction, highlight_block}; 
-// setup_ui_once 대신 ui 모듈의 기능들을 가져옵니다.
+// [수정] update_chunks는 사라졌고, 세분화된 시스템을 가져옵니다.
+use crate::chunk::{load_assets, check_assets_ready, rebuild_chunks, queue_chunks, process_chunks, despawn_chunks};
 use crate::ui::{setup_ui, update_inventory_input, Inventory};
+use crate::player::player_look; 
+use crate::physics::player_physics; 
+use crate::interaction::{player_interaction, highlight_block};
 
 fn main() {
     App::new()
@@ -19,9 +23,9 @@ fn main() {
         .insert_resource(VoxelWorld::default())
         .insert_resource(ChunkManager::default())
         .insert_resource(TextureMap::default())
-        .insert_resource(Inventory::default()) // [추가] 인벤토리 리소스 초기화
+        .insert_resource(Inventory::default())
+        .insert_resource(ClearColor(Color::srgba(0.5, 0.8, 1.0, 1.0))) 
         
-        // [수정] setup_ui_once -> setup_ui 로 변경
         .add_systems(Startup, (setup_ui, grab_cursor)) 
         
         .add_systems(OnEnter(GameState::Loading), load_assets)
@@ -30,12 +34,15 @@ fn main() {
         
         .add_systems(Update, (
             player_look, 
-            player_physics, 
+            player_physics,     
             player_interaction, 
-            update_chunks, 
+            highlight_block,    
+            update_inventory_input,
+            // [수정] 비동기 청크 시스템 등록
+            queue_chunks,   // 1. 작업 요청
+            process_chunks, // 2. 작업 완료 및 생성
+            despawn_chunks, // 3. 멀어진 청크 삭제
             rebuild_chunks,
-            highlight_block,
-            update_inventory_input // [추가] 키보드 1~5 입력 감지 시스템
         ).run_if(in_state(GameState::InGame)))
         
         .run();
