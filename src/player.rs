@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use crate::world::*;
 use crate::chunk::{ChunkCoord, NeedsRemesh};
-
+use crate::ui::Inventory;
 #[derive(Component)]
 pub struct Player {
     pub velocity: Vec3,
@@ -180,30 +180,35 @@ pub fn highlight_block(
         }
     }
 }
-
-// === 블록 파괴 및 설치 ===
+// === [수정] 블록 상호작용 ===
 pub fn player_interaction(
     mut commands: Commands,
     mouse_input: Res<ButtonInput<MouseButton>>,
     mut voxel_world: ResMut<VoxelWorld>,
     camera_query: Query<&GlobalTransform, With<MainCamera>>,
-    chunk_query: Query<(Entity, &ChunkCoord)>, 
+    chunk_query: Query<(Entity, &ChunkCoord)>,
+    inventory: Res<Inventory>, // [추가] 현재 선택된 블록 정보 가져오기
 ) {
     if let Ok(cam_tf) = camera_query.get_single() {
-        // [수정] *cam_tf.forward() 로 변경하여 Dir3 -> Vec3 변환
         if let Some((hit_pos, prev_pos)) = raycast_voxel(cam_tf.translation(), *cam_tf.forward(), 6.0, &voxel_world) {
             
+            // 좌클릭: 파괴
             if mouse_input.just_pressed(MouseButton::Left) {
+                // ... (파괴 로직 그대로) ...
                 println!("🔨 파괴: {:?}", hit_pos);
                 voxel_world.blocks.insert(hit_pos, BLOCK_AIR);
                 refresh_chunk(hit_pos, &mut commands, &chunk_query);
             }
             
+            // 우클릭: 설치
             if mouse_input.just_pressed(MouseButton::Right) {
                 let player_dist = cam_tf.translation().distance(prev_pos.as_vec3() + 0.5);
                 if player_dist > 1.5 { 
-                    println!("🧱 설치: {:?}", prev_pos);
-                    voxel_world.blocks.insert(prev_pos, BLOCK_STONE); 
+                    println!("🧱 설치: {:?} (타입: {})", prev_pos, inventory.current_block);
+                    
+                    // [핵심 수정] 무조건 STONE이 아니라, 인벤토리에서 선택한 블록을 설치!
+                    voxel_world.blocks.insert(prev_pos, inventory.current_block); 
+                    
                     refresh_chunk(prev_pos, &mut commands, &chunk_query);
                 }
             }
@@ -222,10 +227,4 @@ fn refresh_chunk(pos: IVec3, commands: &mut Commands, chunk_query: &Query<(Entit
     }
 }
 
-pub fn setup_ui_once(mut commands: Commands) {
-    commands.spawn(Camera2dBundle { camera: Camera { order: 1, ..default() }, ..default() });
-    commands.spawn(NodeBundle { style: Style { width: Val::Percent(100.0), height: Val::Percent(100.0), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() }, ..default() }).with_children(|parent| {
-        parent.spawn(NodeBundle { style: Style { width: Val::Px(16.0), height: Val::Px(2.0), position_type: PositionType::Absolute, ..default() }, background_color: Color::srgba(1.0, 1.0, 1.0, 0.8).into(), ..default() });
-        parent.spawn(NodeBundle { style: Style { width: Val::Px(2.0), height: Val::Px(16.0), position_type: PositionType::Absolute, ..default() }, background_color: Color::srgba(1.0, 1.0, 1.0, 0.8).into(), ..default() });
-    });
-}
+ 
